@@ -9,7 +9,11 @@ from typing import List, Optional, Dict, Any
 from backend.services.climate_engine import calcular_indice_calor_rothfusz
 from backend.services.tariff_engine import calcular_factura_ende_delbeni
 from backend.services.simulation_engine import simular_consumo_hogar
-from backend.services.validation_service import ejecutar_validacion_cientifica_mape
+from backend.services.validation_service import (
+    ejecutar_validacion_cientifica_mape,
+    listar_medidores_hogares,
+    obtener_historico_medidor,
+)
 from backend.database.connection import get_connection
 
 router = APIRouter(prefix="/api", tags=["Simulador"])
@@ -169,6 +173,21 @@ def obtener_validacion_mape():
     """
     resultado = ejecutar_validacion_cientifica_mape()
     return resultado
+
+@router.get("/hogares")
+def listar_hogares_resumen():
+    """Retorna los 15 hogares registrados en facturas_reales con su tipo de perfil y resumen de kWh"""
+    return listar_medidores_hogares()
+
+
+@router.get("/hogares/{medidor}/historico")
+def obtener_historico_hogar(medidor: str):
+    """Retorna el histórico cronológico de facturas y el perfil de equipos de un medidor"""
+    res = obtener_historico_medidor(medidor)
+    if res is None:
+        raise HTTPException(status_code=404, detail=f"Medidor '{medidor}' no encontrado.")
+    return res
+
 
 @router.get("/hogares/muestra")
 def listar_hogares_muestra():

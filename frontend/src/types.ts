@@ -113,6 +113,30 @@ export interface TarifaVigenteResponse {
   }>;
 }
 
+export interface HogarMedidorResumen {
+  hogar_id: number;
+  alias: string;
+  codigo_medidor: string;
+  tipo_perfil: 'Inventario real verificado' | 'Perfil técnico equivalente';
+  total_facturas: number;
+  promedio_kwh: number;
+  maximo_kwh: number;
+}
+
+export interface FacturaHistoricaMedidor {
+  periodo: string;
+  dias_facturados: number;
+  fecha_lectura_actual: string | null;
+  consumo_kwh: number;
+  total_pagar_bs: number;
+  es_atipico_desocupado: boolean;
+}
+
+export interface HogarHistoricoResponse extends HogarMedidorResumen {
+  facturas: FacturaHistoricaMedidor[];
+  equipos: Array<Omit<EquipoUsuario, 'uid'>>;
+}
+
 export interface ValidacionMapeResponse {
   total_hogares_evaluados: number;
   total_facturas_brutas: number;

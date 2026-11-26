@@ -16,7 +16,7 @@ Se reportan todas las 150 facturas visibles junto con el MAPE bruto y el MAPE de
 """
 from datetime import datetime, timedelta
 from statistics import median
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from backend.database.connection import get_connection
 from backend.services.simulation_engine import simular_consumo_hogar
 
@@ -145,6 +145,123 @@ def _perfil_tecnico_equivalente_fijo(
         ac["horas_dia"] = round(horas_ac, 2)
 
     return no_ac + ac_template
+
+
+INVENTARIO_PILOTO_MEDIDOR115: List[Dict[str, Any]] = [
+    {"nombre": "PRIDE AC-12RHBSE-R32 (11.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.005, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.5},
+    {"nombre": "CHiQ CSH-12OC (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.090, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.5},
+    {"nombre": "MELING CSH-12K (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.160, "tecnologia": "Convencional", "horas_dia": 12.0, "temp_setpoint": 24.5},
+    {"nombre": "LG Split Clásico (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.150, "tecnologia": "Convencional", "horas_dia": 9.0, "temp_setpoint": 24.5},
+    {"nombre": "Heladera Samsung Inverter + Frigobar", "tipo": "refrigeracion", "cantidad": 1, "potencia_kw": 0.20, "tecnologia": "Inverter", "horas_dia": 24.0, "temp_setpoint": 4.0},
+    {"nombre": "Bomba de Agua 0.5 HP", "tipo": "base", "cantidad": 1, "potencia_kw": 0.45, "tecnologia": "Convencional", "horas_dia": 0.5, "temp_setpoint": 24.0},
+    {"nombre": "Duchas Eléctricas (2, tibia ~3.5 kW)", "tipo": "base", "cantidad": 1, "potencia_kw": 3.50, "tecnologia": "Convencional", "horas_dia": 0.63, "temp_setpoint": 24.0},
+    {"nombre": "Electrónica, TVs, PC, PS5, LED, Routers", "tipo": "base", "cantidad": 1, "potencia_kw": 0.272, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.0},
+]
+
+
+def _tipo_perfil_hogar(codigo_medidor: str) -> str:
+    if codigo_medidor == "Medidor115":
+        return "Inventario real verificado"
+    return "Perfil técnico equivalente"
+
+
+def listar_medidores_hogares() -> List[Dict[str, Any]]:
+    """Retorna los 15 hogares registrados en facturas_reales con su resumen estadístico."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                h.id AS hogar_id,
+                h.alias_hogar AS alias,
+                h.codigo_medidor AS codigo_medidor,
+                COUNT(f.id) AS total_facturas,
+                ROUND(AVG(f.consumo_kwh), 1) AS promedio_kwh,
+                ROUND(MAX(f.consumo_kwh), 1) AS maximo_kwh
+            FROM hogares_muestra h
+            INNER JOIN facturas_reales f ON f.hogar_id = h.id
+            GROUP BY h.id, h.alias_hogar, h.codigo_medidor
+            ORDER BY h.id ASC
+            """
+        ).fetchall()
+        return [
+            {
+                "hogar_id": r["hogar_id"],
+                "alias": r["alias"],
+                "codigo_medidor": r["codigo_medidor"],
+                "tipo_perfil": _tipo_perfil_hogar(r["codigo_medidor"]),
+                "total_facturas": int(r["total_facturas"]),
+                "promedio_kwh": float(r["promedio_kwh"] or 0.0),
+                "maximo_kwh": float(r["maximo_kwh"] or 0.0),
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def obtener_historico_medidor(medidor: str) -> Optional[Dict[str, Any]]:
+    """Retorna el histórico cronológico de facturas y el perfil de equipos de un medidor."""
+    conn = get_connection()
+    try:
+        hogar = conn.execute(
+            "SELECT * FROM hogares_muestra WHERE LOWER(codigo_medidor) = LOWER(?) LIMIT 1",
+            (medidor.strip(),),
+        ).fetchone()
+        if not hogar:
+            return None
+
+        facturas = conn.execute(
+            "SELECT * FROM facturas_reales WHERE hogar_id = ? ORDER BY anio ASC, mes ASC",
+            (hogar["id"],),
+        ).fetchall()
+        if not facturas:
+            return None
+
+        kwhs = [float(f["consumo_kwh"]) for f in facturas]
+        p75_hogar = float(_percentil(kwhs, 75))
+        facturas_ocupadas = [
+            f for f in facturas
+            if not (p75_hogar >= 100.0 and float(f["consumo_kwh"]) < 0.25 * p75_hogar)
+        ]
+        if not facturas_ocupadas:
+            facturas_ocupadas = list(facturas)
+
+        codigo = hogar["codigo_medidor"]
+        if codigo == "Medidor115":
+            equipos = [dict(eq) for eq in INVENTARIO_PILOTO_MEDIDOR115]
+        else:
+            climas = {
+                c["mes_numero"]: dict(c)
+                for c in conn.execute("SELECT * FROM escenarios_climaticos").fetchall()
+            }
+            equipos = _perfil_tecnico_equivalente_fijo(facturas_ocupadas, climas)
+
+        facturas_detalle = [
+            {
+                "periodo": f["periodo"],
+                "dias_facturados": int(f["dias_facturados"] or 30),
+                "fecha_lectura_actual": f["fecha_lectura_actual"],
+                "consumo_kwh": round(float(f["consumo_kwh"]), 2),
+                "total_pagar_bs": round(float(f["total_pagar_bs"]), 2),
+                "es_atipico_desocupado": bool(p75_hogar >= 100.0 and float(f["consumo_kwh"]) < 0.25 * p75_hogar),
+            }
+            for f in facturas
+        ]
+
+        return {
+            "hogar_id": hogar["id"],
+            "alias": hogar["alias_hogar"],
+            "codigo_medidor": codigo,
+            "tipo_perfil": _tipo_perfil_hogar(codigo),
+            "total_facturas": len(facturas_detalle),
+            "promedio_kwh": round(sum(kwhs) / len(kwhs), 1),
+            "maximo_kwh": round(max(kwhs), 1),
+            "facturas": facturas_detalle,
+            "equipos": equipos,
+        }
+    finally:
+        conn.close()
 
 
 def ejecutar_validacion_cientifica_mape() -> Dict[str, Any]:
@@ -320,16 +437,7 @@ def ejecutar_validacion_cientifica_mape() -> Dict[str, Any]:
         nivel1_facturas = conn.execute(
             "SELECT * FROM facturas_reales WHERE hogar_id = 4 ORDER BY anio ASC, mes ASC"
         ).fetchall()
-        inventario_piloto = [
-            {"nombre": "PRIDE AC-12RHBSE-R32 (11.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.005, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.5},
-            {"nombre": "CHiQ CSH-12OC (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.090, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.5},
-            {"nombre": "MELING CSH-12K (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.160, "tecnologia": "Convencional", "horas_dia": 12.0, "temp_setpoint": 24.5},
-            {"nombre": "LG Split Clásico (12.000 BTU)", "tipo": "aire_acondicionado", "cantidad": 1, "potencia_kw": 1.150, "tecnologia": "Convencional", "horas_dia": 9.0, "temp_setpoint": 24.5},
-            {"nombre": "Heladera Samsung Inverter + Frigobar", "tipo": "refrigeracion", "cantidad": 1, "potencia_kw": 0.20, "tecnologia": "Inverter", "horas_dia": 24.0, "temp_setpoint": 4.0},
-            {"nombre": "Bomba de Agua 0.5 HP", "tipo": "base", "cantidad": 1, "potencia_kw": 0.45, "tecnologia": "Convencional", "horas_dia": 0.5, "temp_setpoint": 24.0},
-            {"nombre": "Duchas Eléctricas (2, tibia ~3.5 kW)", "tipo": "base", "cantidad": 1, "potencia_kw": 3.50, "tecnologia": "Convencional", "horas_dia": 0.63, "temp_setpoint": 24.0},
-            {"nombre": "Electrónica, TVs, PC, PS5, LED, Routers", "tipo": "base", "cantidad": 1, "potencia_kw": 0.272, "tecnologia": "Convencional", "horas_dia": 18.0, "temp_setpoint": 24.0},
-        ]
+        inventario_piloto = [dict(eq) for eq in INVENTARIO_PILOTO_MEDIDOR115]
         n1_detalle, n1_ek, n1_eb = [], [], []
         for nf in nivel1_facturas:
             t_n1, hr_n1, dias_n1 = _clima_y_dias_factura(nf, climas)

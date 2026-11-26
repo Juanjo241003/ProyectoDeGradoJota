@@ -5,6 +5,8 @@ import type {
   EquipoCatalogo,
   EquipoUsuario,
   EscenarioClimatico,
+  HogarHistoricoResponse,
+  HogarMedidorResumen,
   SimulacionResponse,
   ValidacionMapeResponse,
 } from './types';
@@ -47,23 +49,16 @@ const INVENTARIO_INICIAL: EquipoUsuario[] = [
   },
 ];
 
-const INVENTARIO_PILOTO_H04: EquipoUsuario[] = [
-  { uid: 'h04-pride', nombre: 'PRIDE AC-12RHBSE-R32 (11.000 BTU)', tipo: 'aire_acondicionado', cantidad: 1, potencia_kw: 1.005, tecnologia: 'Convencional', horas_dia: 18, temp_setpoint: 24.5 },
-  { uid: 'h04-chiq', nombre: 'CHiQ CSH-12OC (12.000 BTU)', tipo: 'aire_acondicionado', cantidad: 1, potencia_kw: 1.09, tecnologia: 'Convencional', horas_dia: 18, temp_setpoint: 24.5 },
-  { uid: 'h04-meling', nombre: 'MELING CSH-12K (12.000 BTU)', tipo: 'aire_acondicionado', cantidad: 1, potencia_kw: 1.16, tecnologia: 'Convencional', horas_dia: 12, temp_setpoint: 24.5 },
-  { uid: 'h04-lg', nombre: 'LG Split Clásico (12.000 BTU)', tipo: 'aire_acondicionado', cantidad: 1, potencia_kw: 1.15, tecnologia: 'Convencional', horas_dia: 9, temp_setpoint: 24.5 },
-  { uid: 'h04-ref', nombre: 'Heladera Samsung Inverter + Frigobar', tipo: 'refrigeracion', cantidad: 1, potencia_kw: 0.2, tecnologia: 'Inverter', horas_dia: 24, temp_setpoint: 4 },
-  { uid: 'h04-bomba', nombre: 'Bomba de Agua 0.5 HP', tipo: 'base', cantidad: 1, potencia_kw: 0.45, tecnologia: 'Convencional', horas_dia: 0.5, temp_setpoint: 24 },
-  { uid: 'h04-duchas', nombre: 'Duchas Eléctricas (2, tibia ~3.5 kW)', tipo: 'base', cantidad: 1, potencia_kw: 3.5, tecnologia: 'Convencional', horas_dia: 0.63, temp_setpoint: 24 },
-  { uid: 'h04-elec', nombre: 'Electrónica, TVs, PC, PS5, LED, Routers', tipo: 'base', cantidad: 1, potencia_kw: 0.272, tecnologia: 'Convencional', horas_dia: 18, temp_setpoint: 24 },
-];
-
 export function App() {
   const [vista, setVista] = useState<'simulador' | 'tribunal'>('simulador');
   const [adminOpen, setAdminOpen] = useState(false);
 
   const [escenarios, setEscenarios] = useState<EscenarioClimatico[]>([]);
   const [catalogo, setCatalogo] = useState<EquipoCatalogo[]>([]);
+  const [hogares, setHogares] = useState<HogarMedidorResumen[]>([]);
+  const [medidorSeleccionado, setMedidorSeleccionado] = useState<string>('');
+  const [historicoMedidor, setHistoricoMedidor] = useState<HogarHistoricoResponse | null>(null);
+  const [cargandoMedidor, setCargandoMedidor] = useState(false);
   const [equipos, setEquipos] = useState<EquipoUsuario[]>(INVENTARIO_INICIAL);
   const [tarifaDignidad, setTarifaDignidad] = useState(false);
 
@@ -82,10 +77,11 @@ export function App() {
   const [errorBackend, setErrorBackend] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.getEscenarios(), api.getCatalogoEquipos()])
-      .then(([escs, cat]) => {
+    Promise.all([api.getEscenarios(), api.getCatalogoEquipos(), api.getHogares()])
+      .then(([escs, cat, hogs]) => {
         setEscenarios(escs);
         setCatalogo(cat);
+        setHogares(hogs);
         const ene = escs.find((e) => e.mes_numero === 1) || escs[0];
         if (ene) {
           setMesSeleccionado(ene.mes_numero);
@@ -95,8 +91,33 @@ export function App() {
         setErrorBackend(null);
       })
       .catch((err) => {
-        setErrorBackend(`No se pudo conectar con FastAPI en http://localhost:8000 (${String(err)})`);
+        setErrorBackend(`No se pudo conectar con FastAPI (${String(err)})`);
       });
+  }, []);
+
+  const handleSeleccionarMedidor = useCallback(async (codigo: string) => {
+    setMedidorSeleccionado(codigo);
+    if (!codigo) {
+      setHistoricoMedidor(null);
+      setEquipos([]);
+      return;
+    }
+    setCargandoMedidor(true);
+    try {
+      const hist = await api.getHistoricoHogar(codigo);
+      setHistoricoMedidor(hist);
+      setEquipos(
+        hist.equipos.map((eq, idx) => ({
+          ...eq,
+          uid: `${codigo}-${idx}-${Date.now()}`,
+        }))
+      );
+      setErrorBackend(null);
+    } catch (err) {
+      setErrorBackend(`Error al cargar medidor ${codigo}: ${String(err)}`);
+    } finally {
+      setCargandoMedidor(false);
+    }
   }, []);
 
   const ejecutarTodasSimulaciones = useCallback(async () => {
@@ -236,7 +257,11 @@ export function App() {
               onChangeEquipos={setEquipos}
               tarifaDignidad={tarifaDignidad}
               onToggleTarifaDignidad={setTarifaDignidad}
-              onCargarPiloto={() => setEquipos(INVENTARIO_PILOTO_H04)}
+              hogares={hogares}
+              medidorSeleccionado={medidorSeleccionado}
+              historicoMedidor={historicoMedidor}
+              cargandoMedidor={cargandoMedidor}
+              onSelectMedidor={handleSeleccionarMedidor}
             />
             <PanelEscenarios
               escenarios={escenarios}

@@ -2,6 +2,8 @@ import type {
   EquipoCatalogo,
   EquipoUsuario,
   EscenarioClimatico,
+  HogarHistoricoResponse,
+  HogarMedidorResumen,
   SimulacionResponse,
   TarifaVigenteResponse,
   ValidacionMapeResponse,
@@ -25,6 +27,9 @@ export const api = {
   getCatalogoEquipos: () => fetchJson<EquipoCatalogo[]>(`${API_BASE}/equipos/catalogo`),
   getTarifaVigente: () => fetchJson<TarifaVigenteResponse>(`${API_BASE}/tarifas/vigente`),
   getValidacionMape: () => fetchJson<ValidacionMapeResponse>(`${API_BASE}/validacion/mape`),
+  getHogares: () => fetchJson<HogarMedidorResumen[]>(`${API_BASE}/hogares`),
+  getHistoricoHogar: (medidor: string) =>
+    fetchJson<HogarHistoricoResponse>(`${API_BASE}/hogares/${encodeURIComponent(medidor)}/historico`),
 
   ejecutarSimulacion: (payload: {
     nombre_simulacion?: string;

@@ -1,6 +1,23 @@
 import { useState } from 'react';
-import { Plus, Trash2, Snowflake, Zap, Fan, Tv, ShieldCheck, Home } from 'lucide-react';
-import type { EquipoCatalogo, EquipoUsuario } from '../types';
+import {
+  Plus,
+  Trash2,
+  Snowflake,
+  Zap,
+  Fan,
+  Tv,
+  ShieldCheck,
+  Home,
+  History,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
+import type {
+  EquipoCatalogo,
+  EquipoUsuario,
+  HogarHistoricoResponse,
+  HogarMedidorResumen,
+} from '../types';
 
 interface Props {
   catalogo: EquipoCatalogo[];
@@ -8,7 +25,11 @@ interface Props {
   onChangeEquipos: (next: EquipoUsuario[]) => void;
   tarifaDignidad: boolean;
   onToggleTarifaDignidad: (v: boolean) => void;
-  onCargarPiloto: () => void;
+  hogares: HogarMedidorResumen[];
+  medidorSeleccionado: string;
+  historicoMedidor: HogarHistoricoResponse | null;
+  cargandoMedidor: boolean;
+  onSelectMedidor: (codigo: string) => void;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -31,9 +52,14 @@ export function PanelInventario({
   onChangeEquipos,
   tarifaDignidad,
   onToggleTarifaDignidad,
-  onCargarPiloto,
+  hogares,
+  medidorSeleccionado,
+  historicoMedidor,
+  cargandoMedidor,
+  onSelectMedidor,
 }: Props) {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
+  const [historicoAbierto, setHistoricoAbierto] = useState<boolean>(false);
 
   const catalogoFiltrado =
     filtroTipo === 'todos' ? catalogo : catalogo.filter((c) => c.tipo === filtroTipo);
@@ -72,14 +98,124 @@ export function PanelInventario({
             Mi Hogar (Inventario)
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={onCargarPiloto}
-          className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
-        >
-          Cargar Hogar Piloto (Medidor115)
-        </button>
       </div>
+
+      {/* Selector de medidor de la muestra empírica */}
+      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="selector-medidor" className="text-xs font-medium text-slate-300">
+            Cargar perfil de medidor (SQLite)
+          </label>
+          {historicoMedidor && (
+            <span
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                historicoMedidor.tipo_perfil === 'Inventario real verificado'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}
+            >
+              {historicoMedidor.tipo_perfil}
+            </span>
+          )}
+        </div>
+        <select
+          id="selector-medidor"
+          value={medidorSeleccionado}
+          disabled={cargandoMedidor}
+          onChange={(e) => onSelectMedidor(e.target.value)}
+          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+        >
+          <option value="">Hogar personalizado (vacío/manual)</option>
+          {hogares.map((h) => (
+            <option key={h.hogar_id} value={h.codigo_medidor}>
+              {h.alias} ({h.codigo_medidor}) · Prom. {h.promedio_kwh} kWh/mes
+            </option>
+          ))}
+        </select>
+        {cargandoMedidor && (
+          <p className="text-[11px] text-cyan-400 animate-pulse">
+            Cargando perfil e histórico del medidor...
+          </p>
+        )}
+      </div>
+
+      {/* Tarjeta compacta colapsable: Histórico real del medidor */}
+      {historicoMedidor && (
+        <div className="bg-slate-950/70 border border-slate-800 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setHistoricoAbierto((v) => !v)}
+            className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-900/60 transition cursor-pointer"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-cyan-300">
+                <History className="w-3.5 h-3.5 shrink-0" />
+                <span>Histórico real del medidor</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                Prom: <strong className="text-slate-200">{historicoMedidor.promedio_kwh} kWh/mes</strong> · Máx:{' '}
+                <strong className="text-slate-200">{historicoMedidor.maximo_kwh} kWh</strong> ·{' '}
+                {historicoMedidor.total_facturas} facturas
+              </p>
+            </div>
+            {historicoAbierto ? (
+              <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+            )}
+          </button>
+
+          {historicoAbierto && (
+            <div className="border-t border-slate-800 px-3 py-2.5 max-h-56 overflow-y-auto">
+              <table className="w-full text-[11px] text-left">
+                <thead className="text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="py-1">Periodo</th>
+                    <th className="py-1 text-right">Días</th>
+                    <th className="py-1 text-right">kWh</th>
+                    <th className="py-1 text-right">Bs.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                  {historicoMedidor.facturas.map((f) => {
+                    const pct = Math.min(
+                      100,
+                      Math.round((f.consumo_kwh / Math.max(1, historicoMedidor.maximo_kwh)) * 100)
+                    );
+                    return (
+                      <tr key={f.periodo} className={f.es_atipico_desocupado ? 'text-rose-300/90' : ''}>
+                        <td className="py-1 pr-2">
+                          <div className="flex items-center gap-1.5">
+                            <span>{f.periodo}</span>
+                            {f.es_atipico_desocupado && (
+                              <span className="text-[9px] px-1 rounded bg-rose-500/20 text-rose-300">
+                                atíp.
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-1 text-right text-slate-400">{f.dias_facturados}</td>
+                        <td className="py-1 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="w-10 h-1.5 bg-slate-800 rounded-full overflow-hidden hidden sm:inline-block">
+                              <span
+                                className="block h-full bg-cyan-400 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </span>
+                            <span className="font-medium">{f.consumo_kwh.toFixed(0)}</span>
+                          </div>
+                        </td>
+                        <td className="py-1 text-right">{f.total_pagar_bs.toFixed(1)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Interruptor Tarifa Dignidad */}
       <div className="flex items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5">
