@@ -1,0 +1,19 @@
+# Dependencias y compilados
+node_modules/
+frontend/dist/
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Entornos virtuales y variables locales
+venv/
+.venv/
+.env
+.env.*
+
+# Facturas PDF reales de terceros (privacidad)
+Facturas/
+
+# Mantener la base de datos calibrada para despliegue inmediato en Render
+!simulador_trinidad.db
+!backend/simulador_trinidad.db
